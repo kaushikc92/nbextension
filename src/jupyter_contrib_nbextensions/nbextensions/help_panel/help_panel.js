@@ -5,11 +5,15 @@ define([
     'jqueryui',
     'base/js/namespace',
     'base/js/events',
+    'nbextensions/help_panel/cytoscape',
+    'nbextensions/help_panel/d3'
 ], function (
     requirejs,
     $,
     IPython,
-    events
+    events,
+    cytoscape,
+    d3
 ) {
     'use strict';
 
@@ -137,7 +141,7 @@ define([
                 var rel_w = 100 * (pix_w) / side_panel.parent().width();
                 rel_w = rel_w > min_rel_width ? rel_w : min_rel_width;
                 rel_w = rel_w < max_rel_width ? rel_w : max_rel_width;
-                main_panel.css('width', (100 - rel_w) + '%');
+                //main_panel.css('width', (100 - rel_w) + '%');
                 side_panel.css('width', rel_w + '%').data('last_width', rel_w);
             });
             return false;
@@ -153,7 +157,7 @@ define([
 
         var anim_opts = {
             step : function (now, tween) {
-                main_panel.css('width', 100 - now + '%');
+                //main_panel.css('width', 100 - now + '%');
             }
         };
 
@@ -168,13 +172,13 @@ define([
 
         var visible = desired_width > 0;
         if (visible) {
-            main_panel.css({float: 'left', 'overflow-x': 'auto'});
+            //main_panel.css({float: 'left', 'overflow-x': 'auto'});
             side_panel.show();
         }
         else {
             anim_opts['complete'] = function () {
                 side_panel.hide();
-                main_panel.css({float : '', 'overflow-x': '', width: ''});
+                //main_panel.css({float : '', 'overflow-x': '', width: ''});
             };
         }
 
@@ -183,34 +187,249 @@ define([
     };
 
     var populate_side_panel = function(side_panel) {
-        var side_panel_inner = side_panel.find('.side_panel_inner');
-        var qh = IPython.quick_help;
-        var strip_modal = function(into) {
-            // strip qh modal, insert content into element 'into'
-            $('.quickhelp').closest('.modal-body').children().children().appendTo(into);
-        };
+	var side_panel_inner = side_panel.find('.side_panel_inner');
 
-        if ($('.quickhelp').length > 0) {
-            strip_modal(side_panel_inner);
-        }
-        else {
-            // ensure quickhelp shortcuts modal won't show
-            $('body').addClass('help_panel_hide');
-            // get quickhelp to show shortcuts
-            qh.show_keyboard_shortcuts();
-            // attach handler for qh showing shortcuts
-            var qh_dia = $(qh.shortcut_dialog);
-            qh_dia.on('shown.bs.modal', function(evt) {
-                strip_modal(side_panel_inner);
-                // delicately pretend that it was never shown, unbind handlers
-                qh_dia.on('hidden.bs.modal', function () {
-                    $('body').removeClass('help_panel_hide');
-                    qh_dia.off('hidden.bs.modal');
-                }).off('shown.bs.modal').modal("hide");
+
+    var svgContainerDiv = d3.select(".side_panel_inner").append("div");
+    var svgContainer = svgContainerDiv.append("svg").attr("height",500).attr("width", 500);
+
+    var nodeRadius = 25;
+    var nodes = [
+        { label: "A"},
+        { label: "B"},
+        { label: "C"},
+        { label: "D"}
+        ];
+
+    var links = [
+        {source: nodes[0], target: nodes[2]},
+        {source: nodes[1], target: nodes[2]},
+        {source: nodes[2], target: nodes[3]}
+        ];
+
+    svgContainer.append('defs').append('marker')
+        .attr('id', 'arrowhead')
+        .attr('refX', 17.5)
+        .attr('refY', 2)
+        .attr('markerWidth', 8)
+        .attr('markerHeight', 4)
+        .attr('orient', 'auto')
+        .attr('fill', '#ccc')
+        .append('path')
+        .attr('d', 'M 0,0 V 4 L6,2 Z');
+
+    var link = svgContainer.selectAll("line")
+        .data(links)
+        .enter()
+        .append("line")
+        .attr("class", "link")
+        .attr("marker-end", "url(#arrowhead)")
+        //.attr("x1", function(d) { return d.source.x;})
+        //.attr("y1", function(d) { return d.source.y })
+        //.attr("x2", function(d) { return d.target.x })
+        //.attr("y2", function(d) { return d.target.y })
+        .style("stroke", "rgb(6,120,155)");
+
+    /*
+    var node = svgContainer.selectAll("circle .nodes")
+        .data(nodes)
+        .enter()
+        .append("svg:circle")
+        .attr("class", "nodes")
+        .attr("cx", function(d) { return d.x; })
+        .attr("cy", function(d) { return d.y; })
+        .attr("r", nodeRadius)
+        .attr("fill", "#d0d0e1");
+
+    svgContainer.selectAll(".text")
+        .data(nodes)
+        .enter()
+        .append("text")
+        .attr("x", function(d) { return d.x - 4; })
+        .attr("y", function(d) { return d.y + 4; })
+        .text(function(d) { return d.label; });
+    */
+
+    var node = svgContainer.selectAll('g')
+        .data(nodes)
+        .enter()
+        .append("g");
+
+    node.append("circle")
+        .attr("r", nodeRadius)
+        .attr("class", "node")
+        .attr("fill", "#d0d0e1");
+
+    node.append("text")
+        .attr("text-anchor", "middle")
+        .attr("y", 5)
+        .text(function(d) { return d.label; });
+
+    var charge = 700 * nodes.length;
+
+    var simulation = d3.forceSimulation()
+        .force("link", d3.forceLink().id(function(d) { return d.label; }))
+        .force("charge", d3.forceManyBody().strength(-(charge)))
+        .force("center", d3.forceCenter(250, 250));
+        
+    simulation.nodes(nodes).on("tick", tick);
+    
+    simulation.force("link").links(links);
+     
+    simulation.force("link").distance(150);
+
+    //simulation.restart();
+    //for (var i = 0; i < nodes.length * 100; ++i) simulation.tick();
+    //simulation.stop();
+
+    function tick() {
+
+        var k = -12 * simulation.alpha();
+
+        link
+            .each(function(d) { d.source.y += k, d.target.y -= k; })
+            .attr("x1", function(d) { return d.source.x; })
+            .attr("y1", function(d) { return d.source.y; })
+            .attr("x2", function(d) { return d.target.x; })
+            .attr("y2", function(d) { return d.target.y; });
+
+        node
+            .attr('transform', function(d) {
+                return 'translate(' + d.x + ',' + d.y + ')';
             });
-        }
-        // make sure content we stripped will be rebuilt
-        qh.force_rebuild = true;
+//        node
+//            .attr("cx", function(d) { return d.x; })
+//            .attr("cy", function(d) { return d.y; });
+    }
+    /*
+    svgContainer.append('defs').append('marker')
+        .attr('id', 'arrowhead')
+        .attr('refX', 17.5)
+        .attr('refY', 2)
+        .attr('markerWidth', 8)
+        .attr('markerHeight', 4)
+        .attr('orient', 'auto')
+        .attr('fill', '#ccc')
+        .append('path')
+        .attr('d', 'M 0,0 V 4 L6,2 Z');
+
+    var nodes = [
+        { name: "nodeA" },
+        { name: "nodeB" },
+        { name: "nodeC" },
+        { name: "nodeD" }
+        ];
+
+    var links = [
+        { source: "nodeA", target: "nodeC" },
+        { source: "nodeB", target: "nodeC" },
+        { source: "nodeC", target: "nodeD" }
+        ];
+    
+    //var simulation = 
+
+    var link = svgContainer.selectAll('line')
+        .data(links)
+        .enter()
+        .append('line')
+        .attr('class', 'link')
+        .attr('marker-end', 'url(#arrowhead)');
+
+    var node = svgContainer.selectAll('g')
+        .data(nodes)
+        .enter()
+        .append('g');
+
+    node.append('circle')
+        .attr('r', radius)
+        .attr('class', 'node')
+        .attr('fill', '#1BA1E2')
+
+    node.append('text')
+        .attr('y', 4)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'white')
+        .attr('class', 'bold-text')
+        .text(function(d) {
+            return d.name;
+            //if (d.name.length > 10) {
+            //    return d.name.substring(0, 8) + '...';
+            //}
+            //return d.name;
+        });
+
+    var charge = 700 * nodes.length;
+
+    var force = d3.layout.force()
+        .size([500, 500])
+        .nodes(nodes)
+        .links(links)
+        .linkDistance(150)
+        .charge(-(charge))
+        .gravity(1)
+        .on('tick', tick);
+
+    force.start();
+    for (var i = 0; i < nodes.length * 100; ++i) force.tick();
+    force.stop();
+
+    function tick(e) {
+        var k = -12 * e.alpha;
+        link.each(function(d) { d.source.y -= k, d.target.y += k; })
+            .attr('x2', function(d) { return d.source.x; })
+            .attr('y2', function(d) { return d.source.y; })
+            .attr('x1', function(d) { return d.target.x; })
+            .attr('y1', function(d) { return d.target.y; });
+
+        node.attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+    }
+
+    /*
+    /*
+
+    var nodeRadius = "25px";
+    var nodes = [
+        {x: 200, y: 50, label: "A"},
+        {x: 400, y: 50, label: "B"},
+        {x: 300, y: 150, label: "C"},
+        {x: 300, y: 250, label: "D"}
+        ];
+
+    var links = [
+        {source: nodes[0], target: nodes[2]},
+        {source: nodes[1], target: nodes[2]},
+        {source: nodes[2], target: nodes[3]}
+        ];
+
+    svgContainer.selectAll(".line")
+        .data(links)
+        .enter()
+        .append("line")
+        .attr("x1", function(d) { return d.source.x;})
+        .attr("y1", function(d) { return d.source.y })
+        .attr("x2", function(d) { return d.target.x })
+        .attr("y2", function(d) { return d.target.y })
+        .style("stroke", "rgb(6,120,155)");
+    
+    svgContainer.selectAll("circle .nodes")
+        .data(nodes)
+        .enter()
+        .append("svg:circle")
+        .attr("class", "nodes")
+        .attr("cx", function(d) { return d.x; })
+        .attr("cy", function(d) { return d.y; })
+        .attr("r", nodeRadius)
+        .attr("fill", "#d0d0e1");
+
+    svgContainer.selectAll(".text")
+        .data(nodes)
+        .enter()
+        .append("text")
+        .attr("x", function(d) { return d.x - 4; })
+        .attr("y", function(d) { return d.y + 4; })
+        .text(function(d) { return d.label; });
+
+    */
     };
 
     var toggleHelpPanel = function () {
